@@ -357,7 +357,7 @@
     <button class="icon-btn g-x" id="gClose" title="Đóng" hidden></button>
     <div class="g-logo" id="gLogo"></div>
     <h2>Chọn trường</h2>
-    <p class="lead">Chọn trường bạn đang dạy. Bài học và tin nhắn của mỗi trường tách riêng, không lẫn sang trường khác.</p>
+    <p class="lead">Chọn trường bạn đang dạy. Bài học dùng chung cho mọi trường; tin nhắn của mỗi trường tách riêng.</p>
     <div class="g-list" id="gList"></div>
     <button class="btn primary g-add" id="gAdd" type="button"></button>
     <form class="g-form" id="gForm" autocomplete="off" hidden>
@@ -366,8 +366,7 @@
       <input id="gName" type="text" maxlength="40" placeholder="VD: Mầm non Hoa Sen" required>
       <label for="gCode">Mã trường (làm hình đại diện)</label>
       <input id="gCode" type="text" maxlength="4" placeholder="VD: HS1, MN2…" required autocomplete="off" style="text-transform:uppercase">
-      <div class="hint">Trường được lưu trên Firebase nên máy nào mở trang cũng thấy và chọn được. Bài học và tin nhắn của mỗi trường tách riêng.</div>
-      <label class="chk" id="gLegacyRow" hidden><input type="checkbox" id="gLegacy"> Đồng bộ dữ liệu bài học cũ (trước khi có profile) vào trường này</label>
+      <div class="hint">Trường được lưu trên Firebase nên máy nào mở trang cũng thấy và chọn được. Bài học dùng chung cho mọi trường, tin nhắn của mỗi trường tách riêng.</div>
       <button class="btn primary" type="submit" id="gSubmit">Tạo và dùng profile</button>
       <button class="btn" type="button" id="gCancelAdd" style="width:100%;margin-top:8px">Huỷ</button>
     </form>
@@ -390,7 +389,6 @@
   <p class="sub">Đang chỉnh sửa trường: <b id="admSchool"></b></p>
   <div class="adm-acts">
     <button class="btn" id="admPass" type="button"></button>
-    <button class="btn" id="admSync" type="button"></button>
     <button class="btn" id="admRename" type="button"></button>
     <button class="btn" id="admDelete" type="button"></button>
     <button class="btn" id="admOut" type="button"></button>
@@ -548,7 +546,6 @@ $("addClassBtn").innerHTML = ic("plus") + " Lớp";
 $("chatIc").innerHTML = ic("chat");
 $("admPass").innerHTML = ic("key") + " Đổi mật khẩu Admin";
 $("admOut").innerHTML = ic("out") + " Đăng xuất Admin";
-$("admSync").innerHTML = ic("refresh") + " Đồng bộ dữ liệu bài học cũ";
 $("admRename").innerHTML = ic("edit") + " Đổi tên / mã trường";
 $("admDelete").innerHTML = ic("trash") + " Xoá trường này";
 
@@ -569,7 +566,8 @@ async function dbReq(method, path, body, q = ""){
   return res.json();
 }
 const base = () => `${ROOT}/schools/${school.id}`;
-const api = (method, path, body) => dbReq(method, base() + path, body);
+const SHARED = `${ROOT}/shared`;       // bài học DÙNG CHUNG cho mọi trường (lessonLinks/shared/classes)
+const api = (method, path, body) => dbReq(method, SHARED + path, body);   // chỉ dùng cho bài học; mật khẩu & tin nhắn vẫn theo từng trường (base())
 
 function requireAdmin(){
   if(isAdmin) return true;
@@ -593,8 +591,18 @@ async function load(silent){
   const sid = school.id;
   try{
     if(!silent) setStatus("Đang tải…","busy");
-    const d = (await api("GET", "/classes")) || {};
+    let d = (await api("GET", "/classes")) || {};
+    if(!Object.keys(d).length){
+      // Lần đầu dùng chung: nếu kho chung còn trống thì lấy bài học sẵn có của trường này làm gốc
+      const own = await dbReq("GET", `${ROOT}/schools/${sid}/classes`);
+      if(own && Object.keys(own).length){
+        await dbReq("PATCH", `${SHARED}/classes`, own);
+        d = own;
+        if(!silent) toast("Đã chuyển bài học của trường này thành kho dùng chung");
+      }
+    }
     if(!school || school.id !== sid) return; // đã đổi trường trong lúc tải
+    if(silent === "poll" && JSON.stringify(d) === JSON.stringify(data)){ setStatus("Đã đồng bộ"); return; }
     data = d;
     setStatus("Đã đồng bộ");
     if(!currentClass || !data[currentClass]){
@@ -775,7 +783,6 @@ async function showGate(closable){
   if(window.closeChat) closeChat();
   document.body.classList.add("gate-on");
   $("gate").hidden = false;
-  $("gLegacyRow").hidden = true;
   toggleAddForm(false);
   updateSchoolUI();
   $("gList").innerHTML = `<div class="g-none">Đang tải danh sách trường…</div>`;
@@ -790,11 +797,6 @@ async function showGate(closable){
     $("gList").innerHTML = `<div class="g-none">Không tải được danh sách trường.<br><small>${esc(e.message)} — kiểm tra mạng / Rules Firebase.</small><br><button class="btn" id="gRetry" type="button" style="margin-top:10px">Thử lại</button></div>`;
     return;
   }
-  // Gợi ý chuyển dữ liệu lớp cũ (trước khi có profile) nếu chưa ai nhận
-  try{
-    const leg = await dbReq("GET", `${ROOT}/classes`, undefined, "?shallow=true");
-    if(leg && !$("gate").hidden) $("gLegacyRow").hidden = false;
-  }catch(e){}
 }
 function hideGate(){
   $("gate").hidden = true;
@@ -843,12 +845,6 @@ $("gForm").onsubmit = async e => {
     const createdAt = Date.now();
     const r = await dbReq("POST", `${ROOT}/schoolList`, {name, code, createdAt});
     const id = r.name;
-    if($("gLegacy").checked && !$("gLegacyRow").hidden){
-      const old = await dbReq("GET", `${ROOT}/classes`);
-      if(old){
-        await dbReq("PATCH", `${ROOT}/schools/${id}/classes`, old);
-      }
-    }
     schools[id] = {name, code, createdAt};
     $("gForm").reset();
     ssSet("adm_" + id, "1");     // người tạo trường được vào thẳng chế độ Admin của trường đó
@@ -919,25 +915,11 @@ $("admRename").onclick = () => {
     }catch(ex){ toast("Không cập nhật được (" + ex.message + ")"); }
   });
 };
-$("admSync").onclick = async () => {
-  $("dlgAdm").close();
-  if(!requireAdmin()) return;
-  try{
-    setStatus("Đang đồng bộ…","busy");
-    const old = await dbReq("GET", `${ROOT}/classes`);
-    if(!old || !Object.keys(old).length){ setStatus("Đã đồng bộ"); toast("Không còn dữ liệu bài học cũ để đồng bộ"); return; }
-    const n = Object.keys(old).length;
-    if(!confirm(`Thêm ${n} lớp từ dữ liệu bài học cũ (trước khi có profile trường) vào trường "${school.name}"?\nCác lớp đang có của trường được giữ nguyên.`)){ setStatus("Đã đồng bộ"); return; }
-    await dbReq("PATCH", `${base()}/classes`, old);
-    await load(true);
-    toast(`Đã đồng bộ ${n} lớp vào trường`);
-  }catch(ex){ setStatus("Lỗi lưu","err"); toast("Không đồng bộ được (" + ex.message + ")"); }
-};
 $("admDelete").onclick = async () => {
   $("dlgAdm").close();
   if(!requireAdmin()) return;
   const id = school.id, nm = school.name;
-  if(!confirm(`Xoá trường "${nm}" cùng TOÀN BỘ lớp, bài học và tin nhắn của trường?\nKhông thể hoàn tác.`)) return;
+  if(!confirm(`Xoá trường "${nm}" cùng tin nhắn và mật khẩu Admin của trường?\nBài học dùng chung không bị ảnh hưởng. Không thể hoàn tác.`)) return;
   try{
     await dbReq("DELETE", `${ROOT}/schoolList/${id}`);
     await dbReq("DELETE", `${ROOT}/schools/${id}`);
@@ -987,6 +969,9 @@ $("addClassBtn").onclick = () => { if(!requireAdmin()) return;
   openForm("Thêm lớp", [{label:"Tên lớp", placeholder:"VD: Lớp 3A"}], name =>
     run(async()=>{ const r = await api("POST","/classes",{name, createdAt:Date.now()}); currentClass = r.name; lsSet("currentClass_" + school.id, currentClass); }, "Đã thêm lớp")); };
 $("refreshBtn").onclick = () => { load(); if(window.pollChat) pollChat(); };
+// Bài học dùng chung: tự cập nhật nhẹ khi trường khác sửa (chỉ vẽ lại nếu dữ liệu đổi)
+setInterval(() => { if(!document.hidden && school && $("gate").hidden) load("poll"); }, 20000);
+document.addEventListener("visibilitychange", () => { if(!document.hidden && school && $("gate").hidden) load("poll"); });
 
 $("classList").onclick = e => {
   const it = e.target.closest("[data-class]"); if(!it) return;
