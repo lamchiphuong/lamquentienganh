@@ -180,6 +180,9 @@
   .g-form{border-top:1px dashed var(--line);margin-top:14px;padding-top:4px}
   .g-form h4{margin:12px 0 0;font-size:14px;font-weight:800}
   .g-form .btn{width:100%;height:42px;margin-top:16px;font-size:14px}
+  .g-add{width:100%;height:44px;font-size:14px;margin-top:6px}
+  .g-lock{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--card2);border:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+  .g-lock .btn{flex-shrink:0}
   .hint{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.4}
   .chk{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--text);margin-top:12px;font-size:13px;cursor:pointer}
   .chk input{width:auto}
@@ -346,17 +349,17 @@
     <button class="icon-btn g-x" id="gClose" title="Đóng" hidden></button>
     <div class="g-logo" id="gLogo"></div>
     <h2>Chọn trường</h2>
-    <p class="lead">Mỗi trường là một profile riêng: bài học và tin nhắn của trường này không lẫn sang trường khác.</p>
+    <p class="lead">Chọn trường bạn đang dạy. Bài học và tin nhắn của mỗi trường tách riêng, không lẫn sang trường khác.</p>
     <div class="g-list" id="gList"></div>
-    <form class="g-form" id="gForm" autocomplete="off">
-      <h4>Tạo profile mới</h4>
+    <button class="btn primary g-add" id="gAdd" type="button"></button>
+    <form class="g-form" id="gForm" autocomplete="off" hidden>
+      <h4>Tạo trường mới</h4>
       <label for="gName">Tên trường</label>
       <input id="gName" type="text" maxlength="40" placeholder="VD: Mầm non Hoa Sen" required>
-      <label for="gCode">Mã trường</label>
-      <input id="gCode" type="text" maxlength="40" placeholder="Tối thiểu 4 ký tự" required>
-      <div class="hint">Mã dùng để vào đúng "phòng" của trường. Máy khác nhập cùng mã sẽ thấy cùng bài học và tin nhắn; ai không biết mã sẽ không đọc được.</div>
+      <div class="hint">Trường được lưu trên Firebase nên máy nào mở trang cũng thấy và chọn được. Bài học và tin nhắn của mỗi trường tách riêng.</div>
       <label class="chk" id="gLegacyRow" hidden><input type="checkbox" id="gLegacy"> Chuyển dữ liệu lớp cũ (trước khi có profile) vào trường này</label>
       <button class="btn primary" type="submit" id="gSubmit">Tạo và dùng profile</button>
+      <button class="btn" type="button" id="gCancelAdd" style="width:100%;margin-top:8px">Huỷ</button>
     </form>
   </div>
 </div>
@@ -374,9 +377,11 @@
 
 <dialog id="dlgAdm">
   <h3>Quyền Admin</h3>
-  <p class="sub">Đang chỉnh sửa: <b id="admSchool"></b></p>
+  <p class="sub">Đang chỉnh sửa trường: <b id="admSchool"></b></p>
   <div class="adm-acts">
     <button class="btn" id="admPass" type="button"></button>
+    <button class="btn" id="admRename" type="button"></button>
+    <button class="btn" id="admDelete" type="button"></button>
     <button class="btn" id="admOut" type="button"></button>
     <button class="btn" id="admClose" type="button">Đóng</button>
   </div>
@@ -466,11 +471,12 @@
 <script>
 const DB = "https://gametienganh-9af04-default-rtdb.asia-southeast1.firebasedatabase.app";
 const ROOT = "lessonLinks";            // dữ liệu cũ nằm ở lessonLinks/classes
-const DEFAULT_PASS = "09080211";       // mật khẩu Admin mặc định của mỗi trường (đổi được trong mục Admin)
+const DEFAULT_PASS = "09080211";       // mật khẩu mặc định: dùng để tạo trường mới và là mật khẩu Admin ban đầu của mỗi trường
 
 let school = null;                     // {id, name} — trường đang dùng
-let profiles = [];                     // các profile lưu trong máy
-let isAdmin = false;
+let schools = {};                      // danh sách trường (lưu trên Firebase: lessonLinks/schoolList)
+let isAdmin = false;                   // Admin của trường đang dùng
+let canCreate = false;                 // đã nhập đúng mật khẩu tạo trường (trong tab này)
 let data = {};
 let currentClass = null;
 const expanded = new Set(); // Unit nào đang mở (mặc định tất cả thu gọn)
@@ -482,7 +488,7 @@ const lsSet = (k,v) => { try{ localStorage.setItem(k,v); }catch(e){} };
 const ssGet = k => { try{ return sessionStorage.getItem(k); }catch(e){ return null; } };
 const ssSet = (k,v) => { try{ v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k,v); }catch(e){} };
 
-/* Băm chuỗi (đủ để không lộ mã trường / mật khẩu dạng chữ thường trong database) */
+/* Băm chuỗi (để không lưu mật khẩu dạng chữ thường trong database) */
 function cyrb53(str, seed = 0){
   let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
   for(let i = 0, ch; i < str.length; i++){
@@ -494,8 +500,7 @@ function cyrb53(str, seed = 0){
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
-const schoolIdOf = code => "s" + cyrb53("school|" + code.trim().toLowerCase()).toString(36);
-const passHash = pw => cyrb53("pass|" + school.id + "|" + pw).toString(36);
+const passHash = pw => cyrb53("pass|" + school.id + "|" + pw).toString(36);   // mật khẩu Admin riêng từng trường
 
 const P = {
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -530,6 +535,8 @@ $("addClassBtn").innerHTML = ic("plus") + " Lớp";
 $("chatIc").innerHTML = ic("chat");
 $("admPass").innerHTML = ic("key") + " Đổi mật khẩu Admin";
 $("admOut").innerHTML = ic("out") + " Đăng xuất Admin";
+$("admRename").innerHTML = ic("edit") + " Đổi tên trường";
+$("admDelete").innerHTML = ic("trash") + " Xoá trường này";
 
 function toast(msg){
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
@@ -687,24 +694,27 @@ function openForm(title, fields, onSubmit){
 }
 $("dlgCancel").onclick = () => $("dlg").close();
 
-/* ===== Profile trường ===== */
-function saveProfiles(){ lsSet("schoolProfiles", JSON.stringify(profiles)); }
-function loadProfiles(){
-  try{ const a = JSON.parse(lsGet("schoolProfiles") || "[]"); profiles = Array.isArray(a) ? a.filter(p => p && p.id && p.name) : []; }
-  catch(e){ profiles = []; }
+/* ===== Profile trường (lưu trên Firebase, máy nào cũng dùng chung) ===== */
+async function fetchSchools(){
+  const o = (await dbReq("GET", `${ROOT}/schoolList`)) || {};
+  schools = {};
+  Object.keys(o).forEach(k => { if(o[k] && o[k].name) schools[k] = o[k]; });
+  return schools;
 }
+const schoolKeys = () => Object.keys(schools).sort((a,b)=>(schools[a].createdAt||0)-(schools[b].createdAt||0));
 
 function updateSchoolUI(){
   const has = !!school;
   $("schoolBtn").innerHTML = ic("school") + `<span class="sn">${esc(has ? school.name : "Chọn trường")}</span>` + ic("chev");
-  $("schoolBtn").title = has ? `Trường: ${school.name} — bấm để đổi / tạo profile` : "Chọn trường";
-  $("adminBtn").hidden = !has;
+  $("schoolBtn").title = has ? `Trường: ${school.name} — bấm để đổi trường` : "Chọn trường";
   $("chatBtn").hidden = !has;
+  $("adminBtn").hidden = !has;
   $("adminBtn").classList.toggle("on", isAdmin);
   $("adminBtn").innerHTML = ic(isAdmin ? "unlock" : "lock") + `<span class="lbl">${isAdmin ? "Admin" : "Đăng nhập"}</span>`;
   $("adminBtn").title = isAdmin ? "Đang ở chế độ Admin — bấm để mở menu" : "Đăng nhập Admin để chỉnh sửa";
   document.body.classList.toggle("is-admin", isAdmin);
   document.title = has ? `${school.name} · Làm Quen Tiếng Anh` : "Làm Quen Tiếng Anh - Trẻ Mẫu Giáo";
+  $("gAdd").innerHTML = ic("plus") + " Thêm trường mới";
 }
 
 function setAdmin(v){
@@ -714,14 +724,22 @@ function setAdmin(v){
   render();
 }
 
+function leaveSchool(){
+  school = null; isAdmin = false; lsSet("schoolCurrent", "");
+  data = {}; currentClass = null;
+  if(window.chatReset) chatReset();
+  updateSchoolUI(); render();
+  gateClosable = false; $("gClose").hidden = true;
+}
+
 function enterSchool(id){
-  const p = profiles.find(x => x.id === id);
+  const p = schools[id];
   if(!p) return;
   if(window.closeChat) closeChat();
   closeViewer();
-  school = {id: p.id, name: p.name};
-  lsSet("schoolCurrent", p.id);
-  isAdmin = ssGet("adm_" + p.id) === "1";
+  school = {id, name: p.name};
+  isAdmin = ssGet("adm_" + id) === "1";      // Admin chỉ có hiệu lực với đúng trường đã đăng nhập
+  lsSet("schoolCurrent", id);      // chỉ nhớ trường dùng gần nhất trên máy này
   data = {}; currentClass = null; expanded.clear();
   hideGate();
   updateSchoolUI();
@@ -732,91 +750,108 @@ function enterSchool(id){
 }
 
 let gateClosable = false;
-function showGate(closable){
+async function showGate(closable){
   gateClosable = !!closable;
   $("gClose").hidden = !gateClosable;
   if(window.closeChat) closeChat();
   document.body.classList.add("gate-on");
   $("gate").hidden = false;
-  renderGate();
   $("gLegacyRow").hidden = true;
-  // Chỉ gợi ý chuyển dữ liệu cũ nếu còn dữ liệu lớp ở vị trí cũ
-  dbReq("GET", `${ROOT}/classes`, undefined, "?shallow=true").then(v => {
-    if(v && !$("gate").hidden) $("gLegacyRow").hidden = false;
-  }).catch(()=>{});
+  toggleAddForm(false);
+  updateSchoolUI();
+  $("gList").innerHTML = `<div class="g-none">Đang tải danh sách trường…</div>`;
+  try{
+    await fetchSchools();
+    // Trường đang dùng đã bị xoá ở máy khác
+    if(school && !schools[school.id]) leaveSchool();
+    else if(school) school.name = schools[school.id].name;
+    updateSchoolUI();
+    renderGate();
+  }catch(e){
+    $("gList").innerHTML = `<div class="g-none">Không tải được danh sách trường.<br><small>${esc(e.message)} — kiểm tra mạng / Rules Firebase.</small><br><button class="btn" id="gRetry" type="button" style="margin-top:10px">Thử lại</button></div>`;
+    return;
+  }
+  // Gợi ý chuyển dữ liệu lớp cũ (trước khi có profile) nếu chưa ai nhận
+  try{
+    const [leg, moved] = await Promise.all([
+      dbReq("GET", `${ROOT}/classes`, undefined, "?shallow=true"),
+      dbReq("GET", `${ROOT}/config/legacyMovedTo`)
+    ]);
+    if(leg && !moved && !$("gate").hidden) $("gLegacyRow").hidden = false;
+  }catch(e){}
 }
 function hideGate(){
   $("gate").hidden = true;
   document.body.classList.remove("gate-on");
 }
 function renderGate(){
-  $("gList").innerHTML = profiles.length ? profiles.map(p => `
-    <div class="g-item ${school && school.id === p.id ? 'cur' : ''}" data-id="${esc(p.id)}">
+  const ks = schoolKeys();
+  $("gList").innerHTML = ks.length ? ks.map(id => { const p = schools[id]; return `
+    <div class="g-item ${school && school.id === id ? 'cur' : ''}" data-id="${esc(id)}">
       <div class="avatar" style="--h:${hueName(p.name)}">${esc(initials(p.name))}</div>
-      <div class="t"><b>${esc(p.name)}</b><small>${school && school.id === p.id ? "Đang dùng" : "Bấm để vào trường này"}</small></div>
-      <button class="icon-btn del" data-del="${esc(p.id)}" title="Xoá profile khỏi máy này">${ic("trash")}</button>
-    </div>`).join("")
-    : `<div class="g-none">Chưa có profile nào. Hãy tạo profile cho trường bạn dạy ở bên dưới.</div>`;
+      <div class="t"><b>${esc(p.name)}</b><small>${school && school.id === id ? "Đang dùng" : "Bấm để vào trường này"}</small></div>
+    </div>`; }).join("")
+    : `<div class="g-none">Chưa có trường nào. Bấm "+ Thêm trường mới" để tạo trường đầu tiên.</div>`;
 }
 $("gList").onclick = e => {
-  const del = e.target.closest("[data-del]");
-  if(del){
-    e.stopPropagation();
-    const p = profiles.find(x => x.id === del.dataset.del); if(!p) return;
-    if(!confirm(`Xoá profile "${p.name}" khỏi máy này?\nDữ liệu trên máy chủ không bị xoá, bạn có thể vào lại bằng mã trường.`)) return;
-    profiles = profiles.filter(x => x.id !== p.id); saveProfiles();
-    ssSet("adm_" + p.id, null);
-    if(school && school.id === p.id){
-      school = null; isAdmin = false; lsSet("schoolCurrent", "");
-      data = {}; currentClass = null; if(window.chatReset) chatReset();
-      updateSchoolUI(); render(); gateClosable = false; $("gClose").hidden = true;
-    }
-    renderGate(); toast("Đã xoá profile khỏi máy");
-    return;
-  }
+  if(e.target.closest("#gRetry")){ showGate(gateClosable); return; }
   const it = e.target.closest("[data-id]"); if(!it) return;
   enterSchool(it.dataset.id);
 };
 $("gClose").onclick = () => { if(gateClosable && school) hideGate(); };
+function toggleAddForm(show){
+  $("gForm").hidden = !show;
+  $("gAdd").hidden = show;
+  if(show) setTimeout(() => $("gName").focus(), 30);
+}
+$("gAdd").onclick = () => {
+  if(canCreate){ toggleAddForm(true); return; }
+  openForm("Thêm trường mới", [{label:"Mật khẩu tạo trường", type:"password", placeholder:"Nhập mật khẩu"}], pw => {
+    if(pw === DEFAULT_PASS){ canCreate = true; ssSet("mk", "1"); toggleAddForm(true); }
+    else toast("Sai mật khẩu");
+  });
+};
+$("gCancelAdd").onclick = () => { $("gForm").reset(); toggleAddForm(false); };
 $("schoolBtn").onclick = () => showGate(!!school);
 
 $("gForm").onsubmit = async e => {
   e.preventDefault();
-  const name = $("gName").value.trim().replace(/\s+/g, " "), code = $("gCode").value.trim();
+  if(!canCreate){ toast("Cần nhập mật khẩu để tạo trường"); toggleAddForm(false); return; }
+  const name = $("gName").value.trim().replace(/\s+/g, " ");
   if(!name){ toast("Hãy nhập tên trường"); return; }
-  if(code.length < 4){ toast("Mã trường cần ít nhất 4 ký tự"); return; }
-  const id = schoolIdOf(code);
-  if(profiles.some(p => p.id === id)){ toast("Profile này đã có trên máy"); enterSchool(id); return; }
+  if(Object.values(schools).some(p => p.name.toLowerCase() === name.toLowerCase())){ toast("Đã có trường tên này"); return; }
   const btn = $("gSubmit"); btn.disabled = true; btn.textContent = "Đang tạo…";
   try{
-    const meta = await dbReq("GET", `${ROOT}/schools/${id}/meta`);
-    if(!meta) await dbReq("PUT", `${ROOT}/schools/${id}/meta`, {name, createdAt: Date.now()});
+    const createdAt = Date.now();
+    const r = await dbReq("POST", `${ROOT}/schoolList`, {name, createdAt});
+    const id = r.name;
     if($("gLegacy").checked && !$("gLegacyRow").hidden){
-      const has = await dbReq("GET", `${ROOT}/schools/${id}/classes`, undefined, "?shallow=true");
-      if(!has){
-        const old = await dbReq("GET", `${ROOT}/classes`);
-        if(old) await dbReq("PUT", `${ROOT}/schools/${id}/classes`, old);
+      const old = await dbReq("GET", `${ROOT}/classes`);
+      if(old){
+        await dbReq("PUT", `${ROOT}/schools/${id}/classes`, old);
+        await dbReq("PUT", `${ROOT}/config/legacyMovedTo`, id);
       }
     }
-    profiles.push({id, name}); saveProfiles();
+    schools[id] = {name, createdAt};
     $("gForm").reset();
+    ssSet("adm_" + id, "1");     // người tạo trường được vào thẳng chế độ Admin của trường đó
     enterSchool(id);
-    toast(meta ? "Đã vào trường có sẵn trên máy chủ" : "Đã tạo profile trường");
+    toast("Đã tạo trường");
   }catch(ex){
-    toast("Không tạo được profile (" + ex.message + "). Kiểm tra mạng / Rules Firebase.");
+    toast("Không tạo được trường (" + ex.message + "). Kiểm tra mạng / Rules Firebase.");
   }
   btn.disabled = false; btn.textContent = "Tạo và dùng profile";
 };
 
-/* ===== Admin ===== */
+/* ===== Admin (mật khẩu riêng từng trường, lưu trên Firebase) ===== */
 async function checkPass(pw){
   const stored = await dbReq("GET", `${base()}/meta/pass`);
   return stored ? stored === passHash(pw) : pw === DEFAULT_PASS;
 }
-$("adminBtn").onclick = () => {
+function adminClick(){
   if(!school) return;
   if(!isAdmin){
-    openForm("Đăng nhập Admin", [{label:"Mật khẩu Admin", type:"password", placeholder:"Nhập mật khẩu"}], async pw => {
+    openForm(`Đăng nhập Admin · ${school.name}`, [{label:"Mật khẩu Admin của trường này", type:"password", placeholder:"Nhập mật khẩu"}], async pw => {
       try{
         setStatus("Đang kiểm tra…","busy");
         const ok = await checkPass(pw);
@@ -829,12 +864,13 @@ $("adminBtn").onclick = () => {
   }
   $("admSchool").textContent = school.name;
   $("dlgAdm").showModal();
-};
+}
+$("adminBtn").onclick = adminClick;
 $("admClose").onclick = () => $("dlgAdm").close();
 $("admOut").onclick = () => { $("dlgAdm").close(); setAdmin(false); toast("Đã đăng xuất Admin"); };
 $("admPass").onclick = () => {
   $("dlgAdm").close();
-  openForm("Đổi mật khẩu Admin", [
+  openForm(`Đổi mật khẩu Admin · ${school.name}`, [
     {label:"Mật khẩu hiện tại", type:"password"},
     {label:"Mật khẩu mới (tối thiểu 4 ký tự)", type:"password"},
     {label:"Nhập lại mật khẩu mới", type:"password"}
@@ -845,9 +881,36 @@ $("admPass").onclick = () => {
     try{
       if(!(await checkPass(cur))){ toast("Mật khẩu hiện tại không đúng"); return; }
       await dbReq("PUT", `${base()}/meta/pass`, passHash(np));
-      toast("Đã đổi mật khẩu Admin");
+      toast("Đã đổi mật khẩu Admin của trường này");
     }catch(ex){ toast("Không đổi được mật khẩu (" + ex.message + ")"); }
   });
+};
+$("admRename").onclick = () => {
+  $("dlgAdm").close();
+  const id = school.id;
+  openForm("Đổi tên trường", [{label:"Tên trường", value:school.name}], async name => {
+    if(!requireAdmin()) return;
+    try{
+      await dbReq("PATCH", `${ROOT}/schoolList/${id}`, {name});
+      if(schools[id]) schools[id].name = name;
+      if(school && school.id === id){ school.name = name; updateSchoolUI(); }
+      toast("Đã đổi tên trường");
+    }catch(ex){ toast("Không đổi được tên (" + ex.message + ")"); }
+  });
+};
+$("admDelete").onclick = async () => {
+  $("dlgAdm").close();
+  if(!requireAdmin()) return;
+  const id = school.id, nm = school.name;
+  if(!confirm(`Xoá trường "${nm}" cùng TOÀN BỘ lớp, bài học và tin nhắn của trường?\nKhông thể hoàn tác.`)) return;
+  try{
+    await dbReq("DELETE", `${ROOT}/schoolList/${id}`);
+    await dbReq("DELETE", `${ROOT}/schools/${id}`);
+    delete schools[id]; ssSet("adm_" + id, null);
+    leaveSchool();
+    showGate(false);
+    toast("Đã xoá trường");
+  }catch(ex){ toast("Không xoá được trường (" + ex.message + ")"); }
 };
 
 /* ===== Khung xem link ngay trong trang ===== */
@@ -1256,13 +1319,20 @@ addEventListener("keydown", e => {
 })();
 
 /* ===== Khởi động ===== */
-loadProfiles();
+canCreate = ssGet("mk") === "1";
 updateSchoolUI();
-{
-  const last = lsGet("schoolCurrent");
-  if(last && profiles.some(p => p.id === last)) enterSchool(last);   // mở lên là vào luôn trường đã dùng gần nhất
-  else { setStatus("Chưa chọn trường","busy"); showGate(false); }
-}
+(async () => {
+  setStatus("Đang tải…","busy");
+  try{
+    await fetchSchools();
+    const last = lsGet("schoolCurrent");
+    if(last && schools[last]) enterSchool(last);   // mở lên là vào luôn trường đã dùng gần nhất
+    else { setStatus("Chưa chọn trường","busy"); showGate(false); }
+  }catch(e){
+    setStatus("Mất kết nối","err");
+    showGate(false);                               // hiện nút "Thử lại"
+  }
+})();
 </script>
 </body>
 </html>
