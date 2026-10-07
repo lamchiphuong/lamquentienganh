@@ -234,8 +234,12 @@
   .m-del{width:20px;height:20px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-radius:6px;place-items:center;padding:0;margin-left:4px;vertical-align:middle;opacity:.65}
   .m-del:hover{color:var(--danger);opacity:1}
   .m-del .ic{width:12px;height:12px}
-  .c-form{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--line);background:var(--card);flex-shrink:0}
-  .c-form input{flex:1;height:40px;border-radius:99px;padding:0 16px}
+  .c-form{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid var(--line);background:var(--card);flex-shrink:0}
+  .c-form textarea{flex:1;min-width:0;display:block;width:100%;height:40px;max-height:80px;resize:none;overflow-y:hidden;font:inherit;font-size:14px;line-height:20px;padding:9px 16px;border:1px solid var(--line);border-radius:20px;background:var(--card2);color:var(--text)}
+  .c-form textarea:focus{outline:2px solid color-mix(in srgb,var(--p1) 60%,transparent);outline-offset:-1px;border-color:transparent}
+  .c-nl{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card2);color:var(--muted);display:grid;place-items:center;cursor:pointer;flex-shrink:0;padding:0;transition:.15s}
+  .c-nl:hover{color:var(--p1);border-color:var(--p1)}
+  .c-nl .ic{width:18px;height:18px}
   .c-send{width:40px;height:40px;border-radius:50%;border:none;background:var(--grad);color:#fff;display:grid;place-items:center;cursor:pointer;flex-shrink:0;box-shadow:0 4px 12px rgba(99,102,241,.4);transition:.15s}
   .c-send:hover{filter:brightness(1.1);transform:scale(1.05)}
   .c-send:disabled{opacity:.5;cursor:default;transform:none}
@@ -430,7 +434,8 @@
   <div id="cMainView" style="display:contents">
     <div class="c-msgs" id="cMsgs"></div>
     <form class="c-form" id="cForm" autocomplete="off">
-      <input id="cText" type="text" maxlength="500" placeholder="Nhập tin nhắn…" enterkeyhint="send">
+      <textarea id="cText" rows="1" maxlength="500" placeholder="Nhập tin nhắn…" enterkeyhint="send"></textarea>
+      <button class="c-nl" id="cNl" type="button" title="Xuống dòng (Shift + Enter)"></button>
       <button class="c-send" id="cSend" type="submit" title="Gửi"></button>
     </form>
   </div>
@@ -523,6 +528,7 @@ const P = {
   video:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/>',
   link:'<path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7"/>',
   chat:'<path d="M21 11.5a8.4 8.4 0 01-9 8.4 8.9 8.9 0 01-3.6-.8L3 21l1.9-5.1A8.4 8.4 0 1121 11.5z"/>',
+  newline:'<path d="M20 5v7a3 3 0 01-3 3H5M9 11l-4 4 4 4"/>',
   send:'<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
   swap:'<path d="M17 3l4 4-4 4M21 7H8M7 21l-4-4 4-4M3 17h13"/>',
   user:'<path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>',
@@ -1027,6 +1033,29 @@ $("main").onclick = e => {
 (function(){
   $("cClose").innerHTML = ic("close");
   $("cSend").innerHTML = ic("send");
+  $("cNl").innerHTML = ic("newline");
+
+  /* Ô soạn tin: tự cao lên tối đa 3 dòng; Enter = gửi, Shift+Enter hoặc nút ↵ = xuống dòng */
+  const cText = $("cText");
+  function fitText(){
+    cText.style.height = "40px";
+    const h = Math.min(cText.scrollHeight + 2, 80);
+    cText.style.height = h + "px";
+    cText.style.overflowY = cText.scrollHeight + 2 > 80 ? "auto" : "hidden";
+  }
+  cText.addEventListener("input", fitText);
+  cText.addEventListener("keydown", e => {
+    if(e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229){
+      e.preventDefault(); $("cForm").requestSubmit();
+    }
+  });
+  $("cNl").onmousedown = e => e.preventDefault();   // giữ con trỏ trong ô nhập
+  $("cNl").onclick = () => {
+    const a = cText.selectionStart, b = cText.selectionEnd;
+    if(cText.value.length - (b - a) + 1 > cText.maxLength) return;
+    cText.setRangeText("\n", a, b, "end");
+    fitText(); cText.focus();
+  };
   $("cSwap").innerHTML = ic("swap") + " Đổi người dùng";
   $("cFace").innerHTML = ic("user");
 
@@ -1150,7 +1179,7 @@ $("main").onclick = e => {
     e.preventDefault();
     const text = $("cText").value.trim();
     if(!text || !nick || !school) return;
-    $("cText").value = "";
+    $("cText").value = ""; fitText();
     $("cSend").disabled = true;
     try{
       const r = await fetch(chatUrl() + ".json", {
@@ -1160,7 +1189,7 @@ $("main").onclick = e => {
       if(!r.ok) throw new Error("HTTP " + r.status);
       await pollChat(true);
     }catch(ex){
-      $("cText").value = text;
+      $("cText").value = text; fitText();
       toast("Không gửi được tin nhắn (" + ex.message + ")");
     }
     $("cSend").disabled = false;
