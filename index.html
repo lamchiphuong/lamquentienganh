@@ -670,7 +670,7 @@ function render(){
         <div class="unit-head" data-act="toggle">
           <div class="badge">${esc(unitNum(u.name) || i+1)}</div>
           <h3>${esc(u.name)}</h3>
-          <span class="count">${lk.length} lesson</span>
+          <span class="count">${lk.length} hoạt động</span>
           <div class="tools">
             <button class="icon-btn adm-only" data-act="editUnit" title="Đổi tên Unit">${ic("edit")}</button>
             <button class="icon-btn del adm-only" data-act="delUnit" title="Xoá Unit">${ic("trash")}</button>
@@ -692,7 +692,7 @@ function render(){
               </div>
               <a class="icon-btn" href="${esc(l.url)}" target="_blank" rel="noopener" title="Mở link">${ic("ext")}</a>
             </div>`; }).join("") || `<div class="none">Chưa có lesson nào.</div>`}
-          <div class="unit-foot adm-only"><button class="btn dashed" data-act="addLesson">${ic("plus")} Thêm Lesson</button></div>
+          <div class="unit-foot adm-only"><button class="btn dashed" data-act="addLesson">${ic("plus")} Thêm hoạt động</button></div>
         </div>
       </section>`;
     }).join("") || `<div class="empty">Lớp này chưa có Unit.${isAdmin ? " Bấm <b>Thêm Unit</b> để tạo." : ""}</div>`}
@@ -1006,10 +1006,10 @@ $("main").onclick = e => {
   if(act==="addUnit") openForm("Thêm Unit",[{label:"Tên Unit",placeholder:"VD: Unit 1 - Hello"}], name=>run(()=>api("POST",`/classes/${cid}/units`,{name,createdAt:Date.now()}),"Đã thêm Unit"));
   if(act==="editUnit") openForm("Đổi tên Unit",[{label:"Tên Unit",value:cls.units[uid].name}], name=>run(()=>api("PATCH",`/classes/${cid}/units/${uid}`,{name}),"Đã cập nhật"));
   if(act==="delUnit" && confirm(`Xoá "${cls.units[uid].name}" và các Lesson trong đó?`)) run(()=>api("DELETE",`/classes/${cid}/units/${uid}`),"Đã xoá Unit");
-  if(act==="addLesson") openForm("Thêm Lesson",[{label:"Tên Lesson",placeholder:"VD: Lesson 1 - Vocabulary"},{label:"Link bài học",placeholder:"https://..."}], (title,url)=>run(()=>api("POST",`/classes/${cid}/units/${uid}/lessons`,{title,url:fixUrl(url),createdAt:Date.now()}),"Đã thêm Lesson"));
+  if(act==="addLesson") openForm("Thêm hoạt động",[{label:"Tên hoạt động",placeholder:"VD: Lesson 1 - Vocabulary"},{label:"Link bài học",placeholder:"https://..."}], (title,url)=>run(()=>api("POST",`/classes/${cid}/units/${uid}/lessons`,{title,url:fixUrl(url),createdAt:Date.now()}),"Đã thêm hoạt động"));
   if(act==="editLesson"){ const l = cls.units[uid].lessons[lid];
     openForm("Sửa Lesson",[{label:"Tên Lesson",value:l.title},{label:"Link bài học",value:l.url}], (title,url)=>run(()=>api("PATCH",`/classes/${cid}/units/${uid}/lessons/${lid}`,{title,url:fixUrl(url)}),"Đã cập nhật")); }
-  if(act==="delLesson" && confirm("Xoá lesson này?")) run(()=>api("DELETE",`/classes/${cid}/units/${uid}/lessons/${lid}`),"Đã xoá Lesson");
+  if(act==="delLesson" && confirm("Xoá hoạt động này?")) run(()=>api("DELETE",`/classes/${cid}/units/${uid}/lessons/${lid}`),"Đã xoá hoạt động");
   if(act==="copyLesson"){ const url = cls.units[uid].lessons[lid].url;
     (navigator.clipboard?.writeText(url) || Promise.reject()).then(()=>toast("Đã copy link"),()=>toast("Không copy được")); }
 };
